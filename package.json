@@ -1,0 +1,34 @@
+{
+  "name": "purplesector",
+  "version": "1.0.0",
+  "description": "PurpleSector: F1-style live timing for Velocidrone. Holeshot, gate splits, sectors, session history and telemetry, read from the game's built-in race WebSocket.",
+  "private": true,
+  "license": "MIT",
+  "author": "d0t1q",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/d0t1q/PurpleSector-Velocidrone.git"
+  },
+  "homepage": "https://github.com/d0t1q/PurpleSector-Velocidrone#readme",
+  "bugs": {
+    "url": "https://github.com/d0t1q/PurpleSector-Velocidrone/issues"
+  },
+  "type": "module",
+  "main": "sector-timer.mjs",
+  "scripts": {
+    "start": "node sector-timer.mjs",
+    "test": "node test/engine-unit.mjs && node test/run-sim.mjs",
+    "demo": "node test/demo.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "velocidrone",
+    "fpv",
+    "drone racing",
+    "lap timer",
+    "sectors",
+    "telemetry"
+  ]
+}

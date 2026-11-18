@@ -1,0 +1,13 @@
+# Your records and telemetry (created when the timer runs)
+data/
+
+# Temporary and backup files
+*.tmp
+*.bak
+
+# Tooling / OS
+node_modules/
+.DS_Store
+Thumbs.db
+*.zip
+*.log

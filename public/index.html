@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PurpleSector</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Titillium+Web:wght@400;600;700;900&family=JetBrains+Mono:wght@400;700;800&display=swap">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><span class="flag"></span><div><b>Purple<br>Sector</b></div></div>
+  <div class="trackbox"><div class="name" id="trackName">Waiting for Velocidrone…</div><div class="sub" id="trackSub"></div></div>
+  <div class="racebox" id="raceBox"></div>
+  <div class="connbox" id="connBox"></div>
+</header>
+
+<main>
+  <section class="live-grid">
+    <div class="main-col">
+      <div class="panel">
+        <div class="panel-head"><h2>Live timing</h2><span class="hint" id="towerHint"></span><span class="sp"></span><span class="hint" id="towerMeta"></span></div>
+        <div class="scroll"><table class="tower" id="tower"></table></div>
+        <div class="legend">
+          <span><i style="background:var(--purple)"></i>personal best (all sessions)</span>
+          <span><i style="background:var(--green)"></i>session best</span>
+          <span><i style="background:var(--yellow)"></i>slower than your session best</span>
+          <span><i style="background:var(--text)"></i>white: no comparison</span>
+          <span><i style="background:var(--dim)"></i>gates passed in one 0.1 s update (combined, not a record)</span>
+          <span><i style="background:var(--blue)"></i>in progress</span>
+          <span><i style="background:var(--panel-3)"></i>not reached yet</span>
+          <span class="br"></span>
+          <span>Grey ticking time = sector in progress · HS = holeshot (start signal → first start-gate pass) · Δ PB = gap to your PB lap at the last gate: <b class="faster">green ahead</b>, <b style="color:#ff5d5d">red behind</b> · Gap = to the leader · Int = to the pilot ahead</span>
+        </div>
+      </div>
+      <div class="panel" id="tracePanel">
+        <div class="panel-head"><h2>Live telemetry</h2><span class="hint" id="traceHint"></span><span class="sp"></span><span class="keys" id="traceKeys" style="padding:0"></span></div>
+        <div class="chart" id="speedTrace"></div>
+        <div class="chart" id="deltaTrace"></div>
+      </div>
+    </div>
+    <div class="side">
+      <div class="panel">
+        <div class="panel-head"><h2>Track</h2><span class="sp"></span><span class="hint" id="mapHint"></span></div>
+        <div class="map-wrap" id="liveMap"></div>
+        <div class="gauges" id="gauges"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h2>Race control</h2></div>
+        <ul class="feed" id="feed"></ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel lower">
+    <div class="tabs-bar">
+      <div class="tabs" role="tablist" id="tabs">
+        <button data-tab="session">Session</button>
+        <button data-tab="analysis">Race analysis</button>
+        <button data-tab="splits">Gate splits</button>
+        <button data-tab="telemetry">Telemetry</button>
+        <button data-tab="records">Records</button>
+        <button data-tab="track">Track</button>
+        <button data-tab="data">Data</button>
+      </div>
+      <span class="ctl" id="trackCtl"><label for="trackSel">Track</label><select id="trackSel"></select></span>
+      <div class="sesspick" id="sessPick"><button class="sessbtn" id="sessBtn">Session</button><div class="sesspanel" id="sessPanel" hidden></div></div>
+    </div>
+    <div class="tabs-bar" id="raceBar"></div>
+    <div class="tab-body" id="tabBody"></div>
+  </section>
+</main>
+<script type="module" src="/app.js"></script>
+</body>
+</html>
