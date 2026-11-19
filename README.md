@@ -62,7 +62,7 @@ Every table uses the same colours, judged at the moment a time was flown:
 **Underlined** is the fastest in that race (Gate splits) or session (Session). On the Records tab it
 marks the track record in each column. `~1.234` in grey italics means two gates were passed inside one
 0.1 s update, so only their combined time is known and it never counts as a record. **cut** marks a lap
-cut short by a restart. All times are in plain seconds (a 3-lap race reads 86.795).
+cut short by a restart, or by the game flagging a finish partway round the lap (shown as **Early finish**). All times are in plain seconds (a 3-lap race reads 86.795).
 
 ### Sessions
 

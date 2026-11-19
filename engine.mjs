@@ -285,12 +285,15 @@ export class Engine {
     const G = plan?.gates || 0;
     const e0 = plan ? plan.ends[0] - plan.startGate - 1 : 0, e1 = plan ? plan.ends[1] - plan.startGate - 1 : 0;
     const races = this.db.races.filter((r) => r.trackId === trackId).sort((a, b) => a.startedAt - b.startedAt || a.id - b.id);
-    const fit = (cum) => (!cum || !G ? null : cum.length === G ? cum : cum.length > G ? [...cum.slice(0, G - 1), cum.at(-1)] : null);
+    const fit = (cum) => (!cum || !G ? null : cum.length === G ? cum : cum.length === G + 1 ? [...cum.slice(0, G - 1), cum.at(-1)] : null);
     const segsOf = (cum) => cum.map((c, i) => (c == null ? null : i === 0 ? c : cum[i - 1] == null ? null : ms(c - cum[i - 1])));
+    // A lap whose gate times are for another layout: its sectors were split differently, so they don't count.
     const secsOf = (l, cum) =>
       cum
         ? [cum[e0], cum[e0] != null && cum[e1] != null ? cum[e1] - cum[e0] : null, cum[e1] != null && cum[G - 1] != null ? cum[G - 1] - cum[e1] : null].map((v) => (v == null ? null : ms(v)))
-        : (l.sectors || []).map((s) => (s && !s.approx ? s.time : null));
+        : l.cum
+          ? [null, null, null]
+          : (l.sectors || []).map((s) => (s && !s.approx ? s.time : null));
     const lo = (a, b) => (a == null ? b : b == null ? a : Math.min(a, b));
     const blank = () => ({ hs: null, lap: null, sec: [null, null, null], seg: Array(G).fill(null) });
     // Fastest of each thing in the saved history, per pilot.
@@ -413,8 +416,8 @@ export class Engine {
             });
             continue;
           }
-          if (cum.length < G) continue;
-          // Gate times: extra points past the last gate are the finish-line trigger (saved that way
+          if (cum.length < G || cum.length > G + 1) continue; // another gate layout: leave the lap as saved
+          // Gate times: one extra point past the last gate is the finish-line trigger (saved that way
           // by an older version, with sectors split for the wrong gate count): fix the saved lap.
           if (cum.length > G) {
             cum = [...cum.slice(0, G - 1), cum.at(-1)];
@@ -633,6 +636,9 @@ export class Engine {
     } else if (t.layout.startGate !== startGate) {
       t.layout = { startGate, lastGate, confirmed: !!confirmed };
     } else if (confirmed) {
+      // A finish moves the last gate back by one at most: the finish trigger taken for a gate on a
+      // new track. Further back than that, laps were already flown past it, so it's no lap line.
+      if (lastGate < t.layout.lastGate - 1) return false;
       t.layout.lastGate = lastGate;
       t.layout.confirmed = true;
     } else if (lastGate > t.layout.lastGate && !t.layout.confirmed) {
@@ -918,7 +924,18 @@ export class Engine {
 
     if (fin) {
       // Final lap line: the game reports gate = lastGate + 1.
-      if (!prevFin && cur && !cur.closed && lap === cur.lap) dirty = this.closeLap(p, t, gate - 1) || dirty;
+      if (!prevFin && cur && !cur.closed && lap === cur.lap) {
+        const lay = this.track()?.layout;
+        if (lay && lay.startGate === cur.startGate && gate < lay.lastGate) {
+          // Flagged finished partway round the lap (seen on a 40-gate track: "finished" at gate 15 of
+          // lap 2 of 3). That isn't the lap line: keep what was flown as a lap cut short, and leave
+          // the gate layout alone (taking it as the finish once cut the track to 13 gates for good).
+          dirty = this.flushLap(p, 'finished early') || dirty;
+          this.event({ type: 'restart', raceId: this.raceId, pilot: p.name, text: `finished early (lap ${lap}, gate ${gate - lay.startGate} of ${lay.lastGate - lay.startGate + 1})` });
+          return dirty;
+        }
+        dirty = this.closeLap(p, t, gate - 1) || dirty;
+      }
       p.cur = null;
       const flown = this.currentRace()?.pilots[p.key]?.laps.length || (cur && !cur.glitch && cur.crossings.length);
       const entry = !prevFin && flown && this.currentRace() && this.raceEntry(p);
@@ -980,14 +997,10 @@ export class Engine {
       return dirty;
     }
     if (cur.closed) return dirty;
-    const lay = this.track()?.layout;
-    if (lay?.confirmed && lay.startGate === cur.startGate && gate > lay.lastGate) {
-      // The start/finish gate's finish trigger (reported as lastGate+1, ~0.03 s before the start
-      // trigger) on a lap that isn't the last one: that's the lap line.
-      return this.closeLap(p, t, gate - 1) || dirty;
-    }
-    // Otherwise the layout is only (re)learned when the lap closes: a gate past the known last gate
-    // may just be the finish line arriving one update before the finished flag.
+    // A gate past the known last gate is usually the start/finish gate's finish trigger (reported as
+    // lastGate+1, ~0.03 s before the start trigger, or one update before the finished flag). The lap
+    // still only closes at the lap line, which then ends it at the trigger's time (closeLap): closing
+    // it here would drop the rest of the lap whenever the known layout is too short.
     cur.crossings.push({ gate, t });
     cur.maxGate = Math.max(cur.maxGate, gate);
     if (!cur.partial) this.recordProgress(p, lap * 1000 + (gate - cur.startGate), t);
@@ -1029,9 +1042,13 @@ export class Engine {
     const lay = this.track()?.layout;
     const knownLast = lay && lay.startGate === cur.startGate ? lay.lastGate : null;
     const gap = lastC ? endTime - lastC.t : Infinity;
+    // On a confirmed layout, lastGate+1 is the trigger however late the line report comes (the start
+    // gate's own report can be missed when the next gate follows within one 0.1 s update).
     const trigger =
       lastC && cur.crossings.length >= 2 && lastC.gate === cur.maxGate &&
-      (knownLast != null ? lastC.gate > knownLast && gap < KNOWN_TRIGGER_GAP : gap < FINISH_TRIGGER_GAP);
+      (knownLast != null
+        ? lastC.gate > knownLast && (gap < KNOWN_TRIGGER_GAP || (lay.confirmed && lastC.gate === knownLast + 1))
+        : gap < FINISH_TRIGGER_GAP);
     if (finishLastGate == null && trigger) {
       // The start/finish gate's finish trigger (reported as lastGate+1) just before the lap line.
       cur.crossings.pop();

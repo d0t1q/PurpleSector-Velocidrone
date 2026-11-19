@@ -366,6 +366,73 @@ function fly(engine, name, laps, t0 = 1, dt = 1.5) {
   check('raceSeq never below saved race ids', new Engine(db).db.raceSeq, 7);
 }
 
+// A 40-gate track whose start gate reports as gate 2 (gates 3..41, finish trigger 42), 1.5 s per gate.
+function flyLong(e, name, { laps, t0 = 5, earlyFinish = null }) {
+  const send = (lap, gate, t, fin = false) =>
+    e.ingest({ racedata: { [name]: { position: '1', lap: String(lap), gate: String(gate), time: t.toFixed(3), finished: fin ? 'True' : 'False', colour: 'FF0000', uid: 1 } } });
+  let t = t0;
+  send(1, 2, t);
+  for (let lap = 1; lap <= laps; lap++) {
+    for (let g = 3; g <= 41; g++) {
+      t += 1.5;
+      if (earlyFinish && earlyFinish.lap === lap && earlyFinish.gate === g) return send(lap, g, t, true);
+      send(lap, g, t);
+    }
+    t += 1.5;
+    if (lap < laps) {
+      send(lap, 42, t - 0.033); // finish trigger
+      send(lap + 1, 2, t);
+    } else send(lap, 42, t, true);
+  }
+}
+
+// Seen on San Pablo x DRF 004: the game flagged "finished" at gate 15 of lap 2 (of 3) on a 40-gate
+// track. Taking that as the finish line cut the layout to 13 gates for good, and every later lap
+// "ended" at gate 15 (a 19 s lap PB on a 65 s track). It must be a lap cut short instead.
+{
+  const e = new Engine(emptyDb());
+  e.ingest({ session: { trackName: 'Long', sceneryTitle: 'S', raceLength: '3' } });
+  e.ingest({ racestatus: { raceAction: 'start' } });
+  flyLong(e, 'Pia', { laps: 3, earlyFinish: { lap: 2, gate: 15 } });
+  const tr = e.track();
+  const pe = e.currentRace().pilots.pia;
+  check('early finish: layout stays 40 gates', [tr.layout.startGate, tr.layout.lastGate, e.live.events.filter((x) => x.type === 'layout').length], [2, 41, 0]);
+  check('early finish: lap 1 full, lap 2 cut', pe.laps.map((l) => [l.lapTime, !!l.incomplete]), [[59.967, false], [null, true]]);
+  check('early finish: lap 1 keeps all 40 gate times', pe.laps[0].cum.length, 40);
+  check('early finish: best lap is the full lap', tr.pilots.pia.bestLap, 59.967);
+  check('early finish: not a race finish', [pe.finished, pe.stopped, pe.stoppedLap, pe.totalTime], [false, 'finished early', 2, null]);
+  e.ingest({ racedata: { Pia: { position: '1', lap: '3', gate: '2', time: '200', finished: 'False' } } });
+  check('early finish: flying on records nothing', pe.laps.length, 2);
+  // A real finish next race confirms the 40 gates.
+  e.ingest({ racestatus: { raceAction: 'start' } });
+  flyLong(e, 'Pia', { laps: 2 });
+  check('early finish: next race confirms 40 gates', [tr.layout.lastGate, tr.layout.confirmed], [41, true]);
+  check('early finish: next race laps', e.currentRace().pilots.pia.laps.map((l) => l.lapTime), [59.967, 60.033]);
+}
+
+// A layout confirmed wrongly by an older version (13 of the 40 gates): laps still run to the lap
+// line instead of ending at gate 15, the finish puts the layout right, and laps saved for another
+// layout are left as they were (they used to be cut down to fit, losing their gate times).
+{
+  const db = emptyDb();
+  const long = Array.from({ length: 40 }, (_, i) => 1.5 * (i + 1));
+  db.tracks['n:s-long'] = { id: 'n:s-long', name: 'Long', sceneryTitle: 'S', layout: { startGate: 2, lastGate: 14, confirmed: true }, updated: 1,
+    pilots: { pia: { name: 'Pia', best: [null, null, null], bestAt: [null, null, null], bestLap: 60, laps: 1, lastSeen: 1 } } };
+  db.races = [{ id: 1, sessionId: 1, trackId: 'n:s-long', no: 1, startedAt: 1, status: 'finished', raceLaps: 3,
+    pilots: { pia: { name: 'Pia', laps: [{ lap: 1, lapTime: 60, start: 5, end: 65, cum: long, sectors: [] }], finished: false } } }];
+  db.sessions = [{ id: 1, trackId: 'n:s-long', startedAt: 1, endedAt: 2, endReason: 'game closed' }];
+  db.sessionSeq = 1;
+  const e = new Engine(db);
+  check('saved 40-gate lap not cut to fit 13 gates', db.races[0].pilots.pia.laps[0].cum.length, 40);
+  e.ingest({ session: { trackName: 'Long', sceneryTitle: 'S', raceLength: '2' } });
+  e.ingest({ racestatus: { raceAction: 'start' } });
+  flyLong(e, 'Pia', { laps: 2 });
+  const tr = e.track();
+  check('wrong layout: laps run to the line', e.currentRace().pilots.pia.laps.map((l) => l.lapTime), [59.967, 60.033]);
+  check('wrong layout: put right by the finish', [tr.layout.lastGate, tr.layout.confirmed], [41, true]);
+  check('wrong layout: no fake lap record', tr.pilots.pia.bestLap, 59.967);
+}
+
 // IMU messages must not trigger UI updates.
 {
   let changes = 0;

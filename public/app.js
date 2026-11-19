@@ -62,7 +62,7 @@ function colourKey(scope, gaps = false) {
     <span><u class="rbk">1.234</u> underlined: fastest in this ${scope}</span>
     <span><span class="t-approx">~1.234</span> two gates passed in one 0.1 s update: combined time, never a record</span>
     <span><span class="dim">—</span> not flown</span>
-    <span><span class="badge rs">cut</span> lap cut short by a restart</span>${gaps ? `<span class="br"></span><span><span class="mono">7.206<small class="gk">+0.562</small></span> small number: gap to the fastest of that column in this ${scope}</span>` : ''}</div>`;
+    <span><span class="badge rs">cut</span> lap cut short by a restart or an early finish</span>${gaps ? `<span class="br"></span><span><span class="mono">7.206<small class="gk">+0.562</small></span> small number: gap to the fastest of that column in this ${scope}</span>` : ''}</div>`;
 }
 const lapClass = (l) => (!l || l.lapTime == null ? '' : l.lapPb ? 't-tb' : l.lapSb ? 't-pb' : l.lapSb === false ? 't-slow' : '');
 const store = {
@@ -86,11 +86,11 @@ function sectorOfSplit(plan, i) {
   const g = i === plan.gates - 1 ? Infinity : plan.startGate + 1 + i;
   return g <= plan.ends[0] ? 0 : g <= plan.ends[1] ? 1 : 2;
 }
-/** Gate times of a lap, normalised to the layout (extra points past the last gate are the finish trigger). */
+/** Gate times of a lap, normalised to the layout (one extra point past the last gate is the finish trigger; other lengths are another layout). */
 function normCum(cum, G) {
   if (!cum || !G) return cum || null;
   if (cum.length === G) return cum;
-  if (cum.length > G) return [...cum.slice(0, G - 1), cum.at(-1)];
+  if (cum.length === G + 1) return [...cum.slice(0, G - 1), cum.at(-1)];
   return null;
 }
 /** Table cells for one lap's gate splits; gates merged in one update span their columns. */
@@ -694,9 +694,23 @@ function raceModel(race, track) {
   };
 }
 
+/**
+ * "Race" column: the race clock when the lap ended (from the start signal, holeshot included). On
+ * the last lap of a finished race it's the race time, in bold.
+ */
+const RACE_COL_TITLE = 'Race clock at the end of the lap (from the start signal, holeshot included). The last lap of a finished race shows the race time in bold.';
+function raceClockCell(e, l, isLast, best) {
+  if (isLast && e?.finished && e.totalTime != null) {
+    return `<td class="num${rb(e.totalTime, best)}" title="Race time${e.position ? ` · P${e.position}` : ''}"><b>${fmtT(e.totalTime)}</b></td>`;
+  }
+  const t = l?.lapTime != null ? (l.end ?? (l.start != null ? r3(l.start + l.lapTime) : null)) : null;
+  return `<td class="num muted">${t != null ? fmtT(t) : ''}</td>`;
+}
+
 function statusBadge(p, race) {
   if (p.finished) return `<span class="badge finished">P${p.position ?? ''} Fin</span>`;
   if (p.stopped === 'restart') return `<span class="badge rs">Restarted L${p.stoppedLap ?? ''}</span>`;
+  if (p.stopped === 'finished early') return `<span class="badge rs" title="The game flagged a finish partway round the lap">Early finish L${p.stoppedLap ?? ''}</span>`;
   if (p.stopped === 'aborted' || race.status === 'aborted') return '<span class="badge aborted">Aborted</span>';
   if (p.stopped) return `<span class="badge rs">Stopped L${p.stoppedLap ?? ''}</span>`;
   if (race.status === 'running' && race.id === S.live?.raceId) return '<span class="badge running">Racing</span>';
@@ -1162,6 +1176,7 @@ function renderSplits(body, track, race) {
     return;
   }
   const G = plan.gates;
+  const raceBest = minOf(M.cls.filter((p) => p.finished).map((p) => p.totalTime));
   // Card 1: sectors and laps, one block per pilot.
   let sec = '';
   // Card 2: every gate split, with the lap and its time pinned on the left.
@@ -1174,15 +1189,16 @@ function renderSplits(body, track, race) {
     const recP = track.records.find((r) => r.key === p.key);
     const who = `<div class="pilot"><span class="swatch" style="background:${p.colour}"></span>${esc(p.name)} ${statusBadge(p, race)}
       <span class="muted" style="font-weight:400;margin-left:10px">best ${fmtT(p.best)} · ideal ${fmtT(p.ideal)}${p.finished ? ` · race ${fmtT(p.totalTime)}` : ''}</span></div>`;
-    sec += `<tr class="pilot-head"><td colspan="8">${who}</td></tr>`;
+    sec += `<tr class="pilot-head"><td colspan="9">${who}</td></tr>`;
     gates += `<tr class="pilot-head"><td colspan="${G + 2}"><div class="stick">${who}</div></td></tr>`;
     const nLaps = Math.max(M.raceLaps, p.laps.length);
+    const lastLap = Math.max(0, ...p.laps.map((x) => x.lap));
     for (let L = 1; L <= nLaps; L++) {
       const l = p.laps.find((x) => x.lap === L);
       const hsTd = L === 1 && p.holeshot ? gapCell(p.holeshot.time, hsClass(p.holeshot), M.hsBest, false, rb(p.holeshot.time, M.hsBest)) : '<td class="num dim">—</td>';
       const lapNo = `L${L}${l?.incomplete ? ' <span class="badge rs">cut</span>' : ''}`;
       if (!l) {
-        sec += `<tr class="blank"><td class="lapno">${lapNo}</td>${hsTd}<td class="num sb">—</td><td class="num">—</td><td class="num">—</td><td class="num sb">—</td><td class="num">—</td><td class="num">—</td></tr>`;
+        sec += `<tr class="blank"><td class="lapno">${lapNo}</td>${hsTd}<td class="num sb">—</td><td class="num">—</td><td class="num">—</td><td class="num sb">—</td><td class="num">—</td><td class="num">—</td><td class="num">—</td></tr>`;
         gates += `<tr class="blank">${stk(lead[0], lapNo, 'lapno')}${stk(lead[1], '—', 'num')}${Array.from({ length: G }, () => '<td class="num">—</td>').join('')}</tr>`;
         continue;
       }
@@ -1193,16 +1209,16 @@ function renderSplits(body, track, race) {
       const lapTd = gapCell(l.lapTime, lapClass(l), M.fastest, false, `sb ${rb(l.lapTime, M.fastest)}`);
       const theo = l.sectors?.length === 3 && l.sectors.every((x) => !x.approx) ? r3(l.sectors.reduce((a2, x) => a2 + x.time, 0)) : null;
       sec += `<tr class="${l.incomplete ? 'inc' : ''}"><td class="lapno">${lapNo}</td>${hsTd}${secs.join('')}${lapTd}
-        <td class="num ${l.lapDelta == null ? '' : l.lapDelta < 0 ? 'faster' : 'slower'}">${l.lapDelta != null ? fmtD(l.lapDelta) : ''}</td><td class="num muted">${theo != null && l.lapTime != null && Math.abs(theo - l.lapTime) > 0.0015 ? fmtT(theo) : ''}</td></tr>`;
+        <td class="num ${l.lapDelta == null ? '' : l.lapDelta < 0 ? 'faster' : 'slower'}">${l.lapDelta != null ? fmtD(l.lapDelta) : ''}</td><td class="num muted">${theo != null && l.lapTime != null && Math.abs(theo - l.lapTime) > 0.0015 ? fmtT(theo) : ''}</td>${raceClockCell(p, l, L === lastLap, raceBest)}</tr>`;
       gates += `<tr class="${l.incomplete ? 'inc' : ''}">${stk(lead[0], lapNo, 'lapno')}${stk(lead[1], l.lapTime != null ? fmtT(l.lapTime) : '—', `num ${lapClass(l)}`)}${splitCells(plan, l.segs, l.cum, (i, v) => `${segClass(l.segFlags?.[i])}${rb(v, M.raceSegBest[i])}`)}</tr>`;
     }
-    sec += `<tr class="sum"><td>Race best</td><td class="num">${fmtT(p.holeshot?.time)}</td>${p.secBest.map((v, k) => `<td class="num${k === 0 ? ' sb' : ''}">${fmtT(v)}</td>`).join('')}<td class="num sb">${fmtT(p.best)}</td><td class="num muted" colspan="2">best sectors Σ ${fmtT(sumAll(p.secBest))}</td></tr>`;
-    if (recP) sec += `<tr class="sum"><td>All-time PB</td><td class="num">${fmtT(recP.hsBest)}</td>${(recP.best || []).map((v, k) => `<td class="num${k === 0 ? ' sb' : ''}">${fmtT(v)}</td>`).join('')}<td class="num sb">${fmtT(recP.bestLap)}</td><td class="num muted" colspan="2">theoretical ${fmtT(recP.theoretical)}</td></tr>`;
+    sec += `<tr class="sum"><td>Race best</td><td class="num">${fmtT(p.holeshot?.time)}</td>${p.secBest.map((v, k) => `<td class="num${k === 0 ? ' sb' : ''}">${fmtT(v)}</td>`).join('')}<td class="num sb">${fmtT(p.best)}</td><td class="num muted" colspan="2">best sectors Σ ${fmtT(sumAll(p.secBest))}</td><td class="num">${p.finished ? fmtT(p.totalTime) : ''}</td></tr>`;
+    if (recP) sec += `<tr class="sum"><td>All-time PB</td><td class="num">${fmtT(recP.hsBest)}</td>${(recP.best || []).map((v, k) => `<td class="num${k === 0 ? ' sb' : ''}">${fmtT(v)}</td>`).join('')}<td class="num sb">${fmtT(recP.bestLap)}</td><td class="num muted" colspan="2">theoretical ${fmtT(recP.theoretical)}</td><td></td></tr>`;
     gates += `<tr class="sum">${stk(lead[0], 'Race best')}${stk(lead[1], `<span class="muted">Σ</span> ${fmtT(p.ideal)}`, 'num')}${splitCells(plan, p.segBest, null)}</tr>`;
     if (recP?.segBest) gates += `<tr class="sum">${stk(lead[0], 'All-time PB')}${stk(lead[1], `<span class="muted">Σ</span> ${fmtT(recP.ultimate)}`, 'num')}${splitCells(plan, recP.segBest, null)}</tr>`;
   }
   body.innerHTML = `<div class="card"><h3>Sectors &amp; laps · Race ${race.no}</h3>${colourKey('race', true)}
-      <div class="scroll"><table class="splits secs"><thead><tr><th>Lap</th><th class="num">Holeshot</th><th class="num sb">S1</th><th class="num">S2</th><th class="num">S3</th><th class="num sb">Lap</th><th class="num">vs PB</th><th class="num" title="S1+S2+S3 when it differs from the lap time">Σ sectors</th></tr></thead><tbody>${sec}</tbody></table></div></div>
+      <div class="scroll"><table class="splits secs"><thead><tr><th>Lap</th><th class="num">Holeshot</th><th class="num sb">S1</th><th class="num">S2</th><th class="num">S3</th><th class="num sb">Lap</th><th class="num">vs PB</th><th class="num" title="S1+S2+S3 when it differs from the lap time">Σ sectors</th><th class="num" title="${RACE_COL_TITLE}">Race</th></tr></thead><tbody>${sec}</tbody></table></div></div>
     <div class="card"><h3>Gate splits · Race ${race.no}<span class="sp"></span><span class="dim" style="text-transform:none;letter-spacing:0">scroll sideways: the lap stays pinned on the left</span></h3>${colourKey('race')}
       <div class="scroll">${gateTable(plan, lead, gates)}</div></div>`;
 }
@@ -1327,11 +1343,12 @@ function renderSession(body, track, sessRaces) {
   sess.races.forEach((r, ri) => {
     const e = r.pilots.find((x) => x.key === S.sessionPilot);
     if (!e) return;
-    [...e.laps].sort((a, b) => a.lap - b.lap).forEach((raw, li) => {
+    const laps = [...e.laps].sort((a, b) => a.lap - b.lap);
+    laps.forEach((raw, li) => {
       const cum = normCum(raw.cum, G);
       const l = { ...raw, sectors: lapSectors(plan, raw, cum) };
       rows.push({
-        n: rows.length + 1, race: r, raceIdx: ri, firstOfRace: li === 0, lap: l, cum, segs: segsOf(cum),
+        n: rows.length + 1, race: r, raceIdx: ri, firstOfRace: li === 0, lastOfRace: li === laps.length - 1, entry: e, lap: l, cum, segs: segsOf(cum),
         hs: l.lap === 1 ? e.holeshot?.time ?? null : null,
         hsObj: l.lap === 1 ? e.holeshot ?? null : null,
         sectors: (l.sectors || []).map((s) => (s && !s.approx ? s.time : null)),
@@ -1350,6 +1367,7 @@ function renderSession(body, track, sessRaces) {
   const segBest = G ? Array.from({ length: G }, (_, i) => minOf(rows.map((x) => x.segs?.[i]))) : [];
   const secBest = [0, 1, 2].map((k) => minOf(rows.map((x) => x.sectors[k])));
   const hsBest = minOf(rows.map((x) => x.hs));
+  const raceBest = minOf(rows.filter((x) => x.lastOfRace && x.entry.finished).map((x) => x.entry.totalTime));
   const ideal = sumAll(segBest);
   // Trend window = the race length (most common lap count in these races), 2..5 laps.
   const lapCounts = sessRaces.map((r) => r.raceLaps).filter(Boolean);
@@ -1405,7 +1423,7 @@ function renderSession(body, track, sessRaces) {
     let sec = '', gates = '';
     let prevS = null, prevG = null;
     for (const g of ordered) {
-      sec += sessHead(g, 10, false);
+      sec += sessHead(g, 11, false);
       gates += G ? sessHead(g, G + 3, true) : '';
       prevS = prevG = null;
       for (const x of g.rows) {
@@ -1421,7 +1439,7 @@ function renderSession(body, track, sessRaces) {
           ${x.hs != null ? gapCell(x.hs, hsClass(x.hsObj), hsBest, false, rb(x.hs, hsBest)) : '<td></td>'}${secs.join('')}
           <td class="num sb ${lapClass(l)}${rb(l.lapTime, best)}"><b>${l.lapTime != null ? fmtT(l.lapTime) : '—'}</b></td>
           <td class="num muted">${d != null ? (d === 0 ? 'best' : fmtD(d)) : ''}</td>
-          <td class="num ${l.lapDelta == null ? '' : l.lapDelta < 0 ? 'faster' : 'slower'}">${l.lapDelta != null ? fmtD(l.lapDelta) : ''}</td></tr>`;
+          <td class="num ${l.lapDelta == null ? '' : l.lapDelta < 0 ? 'faster' : 'slower'}">${l.lapDelta != null ? fmtD(l.lapDelta) : ''}</td>${raceClockCell(x.entry, l, x.lastOfRace, raceBest)}</tr>`;
         if (G) {
           const flags = normCum(l.segFlags, G);
           const sepG = prevG && prevG !== x.race ? ' race-start' : '';
@@ -1430,15 +1448,15 @@ function renderSession(body, track, sessRaces) {
         }
       }
     }
-    sec += `<tr class="sum"><td></td><td>Session best</td><td></td><td class="num">${fmtT(hsBest)}</td>${secBest.map((v, k) => `<td class="num${k === 0 ? ' sb' : ''}">${fmtT(v)}</td>`).join('')}<td class="num sb">${fmtT(best)}</td><td class="num muted" colspan="2">best sectors Σ ${fmtT(sumAll(secBest))}</td></tr>`;
-    if (rec) sec += `<tr class="sum"><td></td><td>All-time PB</td><td></td><td class="num">${fmtT(rec.hsBest)}</td>${(rec.best || []).map((v, k) => `<td class="num${k === 0 ? ' sb' : ''}">${fmtT(v)}</td>`).join('')}<td class="num sb">${fmtT(rec.bestLap)}</td><td class="num muted" colspan="2">theoretical ${fmtT(rec.theoretical)}</td></tr>`;
+    sec += `<tr class="sum"><td></td><td>Session best</td><td></td><td class="num">${fmtT(hsBest)}</td>${secBest.map((v, k) => `<td class="num${k === 0 ? ' sb' : ''}">${fmtT(v)}</td>`).join('')}<td class="num sb">${fmtT(best)}</td><td class="num muted" colspan="2">best sectors Σ ${fmtT(sumAll(secBest))}</td><td class="num">${raceBest != null ? fmtT(raceBest) : ''}</td></tr>`;
+    if (rec) sec += `<tr class="sum"><td></td><td>All-time PB</td><td></td><td class="num">${fmtT(rec.hsBest)}</td>${(rec.best || []).map((v, k) => `<td class="num${k === 0 ? ' sb' : ''}">${fmtT(v)}</td>`).join('')}<td class="num sb">${fmtT(rec.bestLap)}</td><td class="num muted" colspan="2">theoretical ${fmtT(rec.theoretical)}</td><td></td></tr>`;
     if (G) {
       gates += `<tr class="sum">${stk(lead[0], '')}${stk(lead[1], 'Session best')}${stk(lead[2], `<span class="muted">Σ</span> ${fmtT(ideal)}`, 'num')}${splitCells(plan, segBest, null)}</tr>`;
       if (rec?.segBest) gates += `<tr class="sum">${stk(lead[0], '')}${stk(lead[1], 'All-time PB')}${stk(lead[2], `<span class="muted">Σ</span> ${fmtT(rec.ultimate)}`, 'num')}${splitCells(plan, rec.segBest, null)}</tr>`;
     }
     const newest = `<label class="dim" style="text-transform:none;letter-spacing:0;display:inline-flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" data-sessionnewest ${S.sessionNewest ? 'checked' : ''}> newest first</label>`;
     html += `<div class="card"><h3>Sectors &amp; laps · ${esc(me?.name || '')} · ${esc(sess.label)}<span class="sp"></span>${newest}</h3>${colourKey('session', true)}
-      <div class="scroll"><table class="splits secs"><thead><tr><th class="num">#</th><th>Race · lap</th><th>Time</th><th class="num">Holeshot</th><th class="num sb">S1</th><th class="num">S2</th><th class="num">S3</th><th class="num sb">Lap</th><th class="num">Δ best</th><th class="num" title="Gap to your all-time PB when flown">vs PB</th></tr></thead><tbody>${sec}</tbody></table></div></div>`;
+      <div class="scroll"><table class="splits secs"><thead><tr><th class="num">#</th><th>Race · lap</th><th>Time</th><th class="num">Holeshot</th><th class="num sb">S1</th><th class="num">S2</th><th class="num">S3</th><th class="num sb">Lap</th><th class="num">Δ best</th><th class="num" title="Gap to your all-time PB when flown">vs PB</th><th class="num" title="${RACE_COL_TITLE}">Race</th></tr></thead><tbody>${sec}</tbody></table></div></div>`;
     if (G)
       html += `<div class="card"><h3>Gate splits · ${esc(me?.name || '')}<span class="sp"></span><span class="dim" style="text-transform:none;letter-spacing:0">scroll sideways: the lap stays pinned on the left</span></h3>${colourKey('session')}
         <div class="scroll">${gateTable(plan, lead, gates)}</div></div>`;
